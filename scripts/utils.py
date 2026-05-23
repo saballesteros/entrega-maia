@@ -42,28 +42,38 @@ def load_hf_token(env_file: str = ".env") -> str:
 
 
 def load_kaggle_token(env_file: str = ".env") -> None:
-    """Load KAGGLE_API_TOKEN from a .env file and configure kagglehub auth.
+    """Configure kagglehub auth from .env.
 
-    The token can be either a JSON string {"username": "...", "key": "..."}
-    (the file downloaded from kaggle.com) or just the raw API key string.
+    Priority:
+      1. KAGGLE_API_TOKEN — JSON string {"username":..,"key":..} or raw key.
+      2. KAGGLE_USERNAME + KAGGLE_KEY — legacy credentials.
+    Raises EnvironmentError if neither is available.
     """
     import json as _json
     from dotenv import load_dotenv
 
     path = _find_env_file(env_file)
     load_dotenv(path)
-    token = os.environ.get("KAGGLE_API_TOKEN")
-    if not token:
-        raise EnvironmentError(f"KAGGLE_API_TOKEN not found in {path}")
 
-    try:
-        data = _json.loads(token)
-        os.environ["KAGGLE_USERNAME"] = data["username"]
-        os.environ["KAGGLE_KEY"] = data["key"]
-    except (_json.JSONDecodeError, KeyError):
-        # Token is just the raw API key; username must be set separately or
-        # inferred by kagglehub from the existing ~/.kaggle/kaggle.json
-        os.environ["KAGGLE_KEY"] = token
+    token = os.environ.get("KAGGLE_API_TOKEN")
+    if token:
+        try:
+            data = _json.loads(token)
+            os.environ["KAGGLE_USERNAME"] = data["username"]
+            os.environ["KAGGLE_KEY"] = data["key"]
+        except (_json.JSONDecodeError, KeyError):
+            os.environ["KAGGLE_KEY"] = token
+        return
+
+    username = os.environ.get("KAGGLE_USERNAME")
+    key = os.environ.get("KAGGLE_KEY")
+    if username and key:
+        return
+
+    raise EnvironmentError(
+        f"No Kaggle credentials found in {path}. "
+        "Set KAGGLE_API_TOKEN or KAGGLE_USERNAME + KAGGLE_KEY."
+    )
 
 
 VALID_TOOLS = [

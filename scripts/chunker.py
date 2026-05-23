@@ -51,6 +51,10 @@ def chunk_text(text: str, tokenizer, chunk_size: int, overlap: int) -> list[str]
 def build_chunks(docs_dir: str = DOCS_DIR, output: str = OUTPUT) -> list:
     load_hf_token()
     tokenizer = AutoTokenizer.from_pretrained(ENCODER_MODEL)
+    # Disable the "sequence longer than 512" warning: the limit applies to model
+    # inference, not tokenization. We encode full docs only to split them into
+    # ≤256-token chunks, so each chunk fed to the model is always within limit.
+    tokenizer.model_max_length = int(1e9)
     docs = load_documents(docs_dir)
     print(f"Loaded {len(docs)} documents")
 

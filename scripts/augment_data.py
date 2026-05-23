@@ -97,9 +97,13 @@ def generate_one(client, target_tc: str, few_shot: list) -> str | None:
         text = re.sub(r"^Query:\s*", "", text, flags=re.IGNORECASE)
         if 8 <= len(text.split()) <= 50:
             return text
-    except Exception:
-        pass
-    return None
+        return None
+    except Exception as e:
+        msg = str(e)
+        print(f"  [API error] {type(e).__name__}: {msg}", file=sys.stderr)
+        if "401" in msg or "Authentication" in msg or "Unauthorized" in msg:
+            raise RuntimeError(f"NVIDIA API authentication failed — check NVIDIA_API_KEY in .env\n{e}") from e
+        return None
 
 
 def augment(
@@ -163,10 +167,13 @@ def augment(
         print(f"  done: {generated}/{needed} generated")
 
     # Zero-coverage fill: ensure every valid tool_call combination has >= MIN_PER_CALL examples.
-    # This covers combinations absent from train.csv (e.g. MASA-SEC-016, MASA-SEC-020)
-    # that the per-tool balance loop skips because the tool itself has enough examples overall.
-    existing_tc = set(df["tool_call"].tolist()) | {row["tool_call"] for row in synthetic}
+    # Targets combinations absent from train.csv (e.g. MASA-SEC-016, MASA-SEC-020) that the
+    # per-tool balance loop skips because the tool itself has enough examples overall.
+    # Capped at MAX_FILL_COMBOS per tool to avoid spending hours on high-cardinality tools.
     tc_counts_all = df["tool_call"].value_counts()
+    synth_counts: dict[str, int] = {}
+    for r in synthetic:
+        synth_counts[r["tool_call"]] = synth_counts.get(r["tool_call"], 0) + 1
 
     print("\n[zero-coverage fill] scanning for combinations with < MIN_PER_CALL examples...")
     for tool_name, tool_info in tools_def.items():
@@ -175,15 +182,18 @@ def augment(
         valid_calls = enumerate_calls(tool_name, tool_info)
         zero_calls = [
             tc for tc in valid_calls
-            if tc_counts_all.get(tc, 0) + sum(1 for r in synthetic if r["tool_call"] == tc) < MIN_PER_CALL
+            if tc_counts_all.get(tc, 0) + synth_counts.get(tc, 0) < MIN_PER_CALL
         ]
         if not zero_calls:
             continue
 
-        real = df[df["tool_call"].str.startswith(tool_name)][["query", "tool_call"]].values.tolist()
         print(f"  [{tool_name}] {len(zero_calls)} under-covered combinations → generating {MIN_PER_CALL} each")
 
-        for target_tc in zero_calls:
+        real = df[df["tool_call"].str.startswith(tool_name)][["query", "tool_call"]].values.tolist()
+        if not real:
+            real = [("check the system status", f"{tool_name}()")]
+
+        for combo_i, target_tc in enumerate(zero_calls, 1):
             generated = 0
             attempts = 0
             while generated < MIN_PER_CALL and attempts < MIN_PER_CALL * 8:
@@ -193,8 +203,10 @@ def augment(
                 if query and query.lower() not in seen:
                     seen.add(query.lower())
                     synthetic.append({"query": query, "tool_call": target_tc})
+                    synth_counts[target_tc] = synth_counts.get(target_tc, 0) + 1
                     generated += 1
                 time.sleep(REQUEST_DELAY)
+            print(f"    [{combo_i}/{len(zero_calls)}] {target_tc[:60]} → {generated}/{MIN_PER_CALL}")
 
     out = pd.DataFrame(synthetic)
     Path(output_csv).parent.mkdir(parents=True, exist_ok=True)

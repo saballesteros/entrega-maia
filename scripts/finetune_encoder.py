@@ -26,9 +26,9 @@ ENCODER_MODEL = "BAAI/bge-small-en-v1.5"
 CHUNKS_FILE = "chunks.json"
 CONSULTAS_FILE = "consultas_centro_control.json"
 OUTPUT_DIR = "models/encoder"
-BATCH_SIZE = 32
-EPOCHS = 3
-LR = 2e-5
+BATCH_SIZE = 64
+EPOCHS = 6
+LR = 1e-5
 EVAL_RATIO = 0.20
 # BGE instruction prefix (required for bge-small-en-v1.5)
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
